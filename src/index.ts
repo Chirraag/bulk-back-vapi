@@ -16,7 +16,7 @@ import { logger } from "./utils/logger.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { processCampaignCalls } from "./services/callService.js";
 import { db } from "./lib/firebase.js";
-import { doc, updateDoc, setDoc } from "firebase/firestore";
+import { doc, updateDoc, setDoc, getDoc } from "firebase/firestore";
 
 dotenv.config();
 
@@ -78,11 +78,190 @@ app.post("/outbound", async (req, res) => {
   }
 });
 
+// app.post(
+//   "/campaign/schedule",
+//   [
+//     body("campaign_id").notEmpty().withMessage("Campaign ID is required"),
+//     body("date").isISO8601().withMessage("Invalid date format"),
+//     body("start_time")
+//       .matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/)
+//       .withMessage("Invalid start time format"),
+//     body("end_time")
+//       .matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/)
+//       .withMessage("Invalid end time format"),
+//     body("timezone").notEmpty().withMessage("Timezone is required"),
+//   ],
+//   async (req, res) => {
+//     const errors = validationResult(req);
+//     if (!errors.isEmpty()) {
+//       return res.status(400).json({ errors: errors.array() });
+//     }
+
+//     try {
+//       const { campaign_id, date, start_time, end_time, timezone } = req.body;
+
+//       // Convert campaign date and times to Date objects in the specified timezone
+//       const campaignDate = parseISO(date);
+//       const [startHour, startMinute] = start_time.split(":").map(Number);
+//       const [endHour, endMinute] = end_time.split(":").map(Number);
+
+//       const startDateTime = zonedTimeToUtc(
+//         new Date(
+//           campaignDate.getFullYear(),
+//           campaignDate.getMonth(),
+//           campaignDate.getDate(),
+//           startHour,
+//           startMinute,
+//         ),
+//         timezone,
+//       );
+
+//       const endDateTime = zonedTimeToUtc(
+//         new Date(
+//           campaignDate.getFullYear(),
+//           campaignDate.getMonth(),
+//           campaignDate.getDate(),
+//           endHour,
+//           endMinute,
+//         ),
+//         timezone,
+//       );
+
+//       const now = new Date();
+//       const currentTimeInZone = utcToZonedTime(now, timezone);
+
+//       // Compare just the date portions
+//       const campaignDay = startOfDay(campaignDate);
+//       const currentDay = startOfDay(currentTimeInZone);
+//       const isToday = isEqual(campaignDay, currentDay);
+//       const isPastDay = isPast(campaignDay) && !isToday;
+//       const isFutureDay = isFuture(campaignDay);
+
+//       // Check if start_time >= end_time
+//       if (startDateTime >= endDateTime) {
+//         await updateDoc(doc(db, "campaigns", campaign_id), { status: "ended" });
+//         return res.json({
+//           message:
+//             "Campaign marked as ended: start time is after or equal to end time",
+//           status: "ended",
+//         });
+//       }
+
+//       // If date is in the future, schedule the campaign
+//       if (isFutureDay) {
+//         const [hour, minute] = start_time.split(":");
+//         const cronExpression = `${minute} ${hour} ${campaignDate.getDate()} ${campaignDate.getMonth() + 1} *`;
+
+//         cron.schedule(
+//           cronExpression,
+//           async () => {
+//             logger.info(`Starting scheduled campaign: ${campaign_id}`);
+//             try {
+//               await processCampaignCalls(campaign_id);
+//             } catch (error) {
+//               logger.error(`Error executing campaign ${campaign_id}:`, error);
+//             }
+//           },
+//           {
+//             timezone,
+//             scheduled: true,
+//           },
+//         );
+
+//         return res.json({
+//           message: "Campaign scheduled successfully",
+//           status: "scheduled",
+//         });
+//       }
+
+//       // If date is in the past (not today)
+//       if (isPastDay) {
+//         await updateDoc(doc(db, "campaigns", campaign_id), { status: "ended" });
+//         return res.json({
+//           message: "Campaign marked as ended: campaign date is in the past",
+//           status: "ended",
+//         });
+//       }
+
+//       // If date is today
+//       if (isToday) {
+//         // If start time is in the future, schedule it
+//         if (isFuture(startDateTime)) {
+//           const [hour, minute] = start_time.split(":");
+//           const cronExpression = `${minute} ${hour} ${campaignDate.getDate()} ${campaignDate.getMonth() + 1} *`;
+
+//           cron.schedule(
+//             cronExpression,
+//             async () => {
+//               logger.info(`Starting scheduled campaign: ${campaign_id}`);
+//               try {
+//                 await processCampaignCalls(campaign_id);
+//               } catch (error) {
+//                 logger.error(`Error executing campaign ${campaign_id}:`, error);
+//               }
+//             },
+//             {
+//               timezone,
+//               scheduled: true,
+//             },
+//           );
+
+//           return res.json({
+//             message: "Campaign scheduled successfully for today",
+//             status: "scheduled",
+//           });
+//         }
+
+//         // If start time and end time are in the past
+//         if (isPast(startDateTime) && isPast(endDateTime)) {
+//           await updateDoc(doc(db, "campaigns", campaign_id), {
+//             status: "ended",
+//           });
+//           return res.json({
+//             message:
+//               "Campaign marked as ended: start and end times are in the past",
+//             status: "ended",
+//           });
+//         }
+
+//         // If start time is in the past but end time is in the future, start immediately
+//         if (isPast(startDateTime) && isFuture(endDateTime)) {
+//           logger.info(`Starting campaign immediately: ${campaign_id}`);
+//           try {
+//             // Start the campaign processing immediately
+//             processCampaignCalls(campaign_id).catch((error) => {
+//               logger.error(`Error executing campaign ${campaign_id}:`, error);
+//             });
+
+//             return res.json({
+//               message: "Campaign started immediately",
+//               status: "started",
+//             });
+//           } catch (error) {
+//             logger.error("Error starting campaign:", error);
+//             return res.status(500).json({ error: "Failed to start campaign" });
+//           }
+//         }
+//       }
+
+//       // Default response for any edge cases
+//       return res.status(400).json({
+//         error: "Invalid campaign schedule configuration",
+//         status: "error",
+//       });
+//     } catch (error) {
+//       logger.error("Error scheduling campaign:", error);
+//       res.status(500).json({ error: "Failed to schedule campaign" });
+//     }
+//   },
+// );
+
 app.post(
   "/campaign/schedule",
   [
     body("campaign_id").notEmpty().withMessage("Campaign ID is required"),
-    body("date").isISO8601().withMessage("Invalid date format"),
+    body("start_date").isISO8601().withMessage("Invalid start date format"),
+    body("end_date").isISO8601().withMessage("Invalid end date format"),
     body("start_time")
       .matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/)
       .withMessage("Invalid start time format"),
@@ -98,46 +277,48 @@ app.post(
     }
 
     try {
-      const { campaign_id, date, start_time, end_time, timezone } = req.body;
+      const {
+        campaign_id,
+        start_date,
+        end_date,
+        start_time,
+        end_time,
+        timezone,
+      } = req.body;
 
-      // Convert campaign date and times to Date objects in the specified timezone
-      const campaignDate = parseISO(date);
+      // Validate date range
+      const startDate = parseISO(start_date);
+      const endDate = parseISO(end_date);
+
+      if (
+        isPast(startDate) &&
+        !isEqual(startOfDay(startDate), startOfDay(new Date()))
+      ) {
+        await updateDoc(doc(db, "campaigns", campaign_id), { status: "ended" });
+        return res.json({
+          message: "Campaign marked as ended: start date is in the past",
+          status: "ended",
+        });
+      }
+
+      if (endDate < startDate) {
+        await updateDoc(doc(db, "campaigns", campaign_id), { status: "ended" });
+        return res.json({
+          message: "Campaign marked as ended: end date is before start date",
+          status: "ended",
+        });
+      }
+
+      // Parse times
       const [startHour, startMinute] = start_time.split(":").map(Number);
       const [endHour, endMinute] = end_time.split(":").map(Number);
 
-      const startDateTime = zonedTimeToUtc(
-        new Date(
-          campaignDate.getFullYear(),
-          campaignDate.getMonth(),
-          campaignDate.getDate(),
-          startHour,
-          startMinute,
-        ),
-        timezone,
-      );
-
-      const endDateTime = zonedTimeToUtc(
-        new Date(
-          campaignDate.getFullYear(),
-          campaignDate.getMonth(),
-          campaignDate.getDate(),
-          endHour,
-          endMinute,
-        ),
-        timezone,
-      );
-
-      const now = new Date();
-      const currentTimeInZone = utcToZonedTime(now, timezone);
-
-      // Compare just the date portions
-      const campaignDay = startOfDay(campaignDate);
-      const currentDay = startOfDay(currentTimeInZone);
-      const isToday = isEqual(campaignDay, currentDay);
-      const isPastDay = isPast(campaignDay) && !isToday;
-      const isFutureDay = isFuture(campaignDay);
-
       // Check if start_time >= end_time
+      const startDateTime = new Date();
+      startDateTime.setHours(startHour, startMinute, 0);
+      const endDateTime = new Date();
+      endDateTime.setHours(endHour, endMinute, 0);
+
       if (startDateTime >= endDateTime) {
         await updateDoc(doc(db, "campaigns", campaign_id), { status: "ended" });
         return res.json({
@@ -147,107 +328,83 @@ app.post(
         });
       }
 
-      // If date is in the future, schedule the campaign
-      if (isFutureDay) {
-        const [hour, minute] = start_time.split(":");
-        const cronExpression = `${minute} ${hour} ${campaignDate.getDate()} ${campaignDate.getMonth() + 1} *`;
+      // Schedule daily cron job for the campaign
+      const cronExpression = `${startMinute} ${startHour} * * *`;
 
-        cron.schedule(
-          cronExpression,
-          async () => {
-            logger.info(`Starting scheduled campaign: ${campaign_id}`);
-            try {
-              await processCampaignCalls(campaign_id);
-            } catch (error) {
-              logger.error(`Error executing campaign ${campaign_id}:`, error);
-            }
-          },
-          {
-            timezone,
-            scheduled: true,
-          },
-        );
-
-        return res.json({
-          message: "Campaign scheduled successfully",
-          status: "scheduled",
-        });
-      }
-
-      // If date is in the past (not today)
-      if (isPastDay) {
-        await updateDoc(doc(db, "campaigns", campaign_id), { status: "ended" });
-        return res.json({
-          message: "Campaign marked as ended: campaign date is in the past",
-          status: "ended",
-        });
-      }
-
-      // If date is today
-      if (isToday) {
-        // If start time is in the future, schedule it
-        if (isFuture(startDateTime)) {
-          const [hour, minute] = start_time.split(":");
-          const cronExpression = `${minute} ${hour} ${campaignDate.getDate()} ${campaignDate.getMonth() + 1} *`;
-
-          cron.schedule(
-            cronExpression,
-            async () => {
-              logger.info(`Starting scheduled campaign: ${campaign_id}`);
-              try {
-                await processCampaignCalls(campaign_id);
-              } catch (error) {
-                logger.error(`Error executing campaign ${campaign_id}:`, error);
-              }
-            },
-            {
-              timezone,
-              scheduled: true,
-            },
-          );
-
-          return res.json({
-            message: "Campaign scheduled successfully for today",
-            status: "scheduled",
-          });
-        }
-
-        // If start time and end time are in the past
-        if (isPast(startDateTime) && isPast(endDateTime)) {
-          await updateDoc(doc(db, "campaigns", campaign_id), {
-            status: "ended",
-          });
-          return res.json({
-            message:
-              "Campaign marked as ended: start and end times are in the past",
-            status: "ended",
-          });
-        }
-
-        // If start time is in the past but end time is in the future, start immediately
-        if (isPast(startDateTime) && isFuture(endDateTime)) {
-          logger.info(`Starting campaign immediately: ${campaign_id}`);
+      cron.schedule(
+        cronExpression,
+        async () => {
           try {
-            // Start the campaign processing immediately
-            processCampaignCalls(campaign_id).catch((error) => {
-              logger.error(`Error executing campaign ${campaign_id}:`, error);
-            });
+            // Check if current date is within campaign date range
+            const now = utcToZonedTime(new Date(), timezone);
+            const currentDate = startOfDay(now);
 
-            return res.json({
-              message: "Campaign started immediately",
-              status: "started",
-            });
+            if (
+              currentDate < startOfDay(startDate) ||
+              currentDate > startOfDay(endDate)
+            ) {
+              return;
+            }
+
+            // Check if current time is within campaign hours
+            const currentHour = now.getHours();
+            const currentMinute = now.getMinutes();
+            const currentTime = currentHour * 60 + currentMinute;
+            const campaignStartTime = startHour * 60 + startMinute;
+            const campaignEndTime = endHour * 60 + endMinute;
+
+            if (
+              currentTime < campaignStartTime ||
+              currentTime > campaignEndTime
+            ) {
+              return;
+            }
+
+            // Check campaign status
+            const campaignDoc = await getDoc(doc(db, "campaigns", campaign_id));
+            if (
+              !campaignDoc.exists() ||
+              campaignDoc.data().status === "ended"
+            ) {
+              return;
+            }
+
+            logger.info(`Starting scheduled campaign: ${campaign_id}`);
+            await processCampaignCalls(campaign_id);
           } catch (error) {
-            logger.error("Error starting campaign:", error);
-            return res.status(500).json({ error: "Failed to start campaign" });
+            logger.error(`Error executing campaign ${campaign_id}:`, error);
           }
-        }
+        },
+        {
+          timezone,
+          scheduled: true,
+        },
+      );
+
+      // If today is within the date range and current time is within campaign hours, start immediately
+      const now = utcToZonedTime(new Date(), timezone);
+      const currentDate = startOfDay(now);
+      const currentHour = now.getHours();
+      const currentMinute = now.getMinutes();
+      const currentTime = currentHour * 60 + currentMinute;
+      const campaignStartTime = startHour * 60 + startMinute;
+      const campaignEndTime = endHour * 60 + endMinute;
+
+      if (
+        currentDate >= startOfDay(startDate) &&
+        currentDate <= startOfDay(endDate) &&
+        currentTime >= campaignStartTime &&
+        currentTime <= campaignEndTime
+      ) {
+        logger.info(`Starting campaign immediately: ${campaign_id}`);
+        processCampaignCalls(campaign_id).catch((error) => {
+          logger.error(`Error executing campaign ${campaign_id}:`, error);
+        });
       }
 
-      // Default response for any edge cases
-      return res.status(400).json({
-        error: "Invalid campaign schedule configuration",
-        status: "error",
+      return res.json({
+        message: "Campaign scheduled successfully",
+        status: "scheduled",
       });
     } catch (error) {
       logger.error("Error scheduling campaign:", error);
