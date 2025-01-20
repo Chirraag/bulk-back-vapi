@@ -464,6 +464,6 @@ app.post("/*", (req, res) => {
 app.use(errorHandler);
 
 // Start server
-app.listen(port, '0.0.0.0', () => {
+app.listen(port, () => {
   logger.info(`Server running on port ${port}`);
 });
