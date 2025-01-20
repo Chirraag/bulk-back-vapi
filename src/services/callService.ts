@@ -330,12 +330,12 @@ export async function processCampaignCalls(campaignId: string) {
           callCount++;
 
           // Wait 1 second between calls
-          await sleep(1000);
+          await sleep(2500);
 
           // If we've made 10 calls, wait for 10 seconds
           if (callCount % 10 === 0) {
             logger.info("Pausing for 10 seconds after 10 calls");
-            await sleep(10000);
+            await sleep(15000);
           }
         }
       } catch (error) {
@@ -350,6 +350,7 @@ export async function processCampaignCalls(campaignId: string) {
           error: error.message,
           called_at: new Date().toISOString(),
         });
+        await sleep(10000);
         continue; // Continue with next contact even if one fails
       }
     }

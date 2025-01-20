@@ -30,34 +30,68 @@ app.use(express.json());
 // Routes
 app.post("/current_date_and_time", (req, res) => {
   try {
-    const dubaiTime = format(new Date(), "yyyy-MM-dd HH:mm:ss", {
-      timeZone: "Asia/Dubai",
+    console.log("current date and time hit");
+    console.log(req.body);
+    const dubaiTime = format(
+      utcToZonedTime(new Date(), "Asia/Dubai"), // Convert UTC to Dubai timezone
+      "yyyy-MM-dd HH:mm:ss", // Desired format
+      { timeZone: "Asia/Dubai" }, // Specify timezone explicitly
+    );
+
+    console.log(req.body.message.toolCalls[0]);
+    res.json({
+      results: [
+        { toolCallId: req.body.message.toolCalls[0].id, result: dubaiTime },
+      ],
     });
-    res.json({ current_time: dubaiTime });
   } catch (error) {
     logger.error("Error getting current time:", error);
     res.status(500).json({ error: "Failed to get current time" });
   }
 });
 
-app.post(
-  "/make_appointment",
-  [
-    body("date").isISO8601().withMessage("Invalid date format"),
-    body("time")
-      .matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/)
-      .withMessage("Invalid time format"),
-    body("phone").isMobilePhone("any").withMessage("Invalid phone number"),
-  ],
-  (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
+app.post("/make-appointment", async (req, res) => {
+  console.log("Wildcard route make-app");
+  console.log("Path:", req.path);
+  console.log("Original URL:", req.originalUrl);
+  console.log(req.body);
 
-    res.json({ message: "Appointment scheduled successfully" });
-  },
-);
+  try {
+    const callId = req.body.message.call.id;
+    const toolCall = req.body.message.toolCalls[0];
+    console.log(toolCall.function.arguments);
+    const functionArguments = toolCall.function.arguments;
+    const { date, time } = functionArguments;
+
+    // Prepare the data to be saved in Firestore
+    const appointmentData = {
+      date: date,
+      time: time,
+    };
+
+    // Save the data to Firestore
+    // Save the data to Firestore
+    const appointmentRef = doc(db, "appointments", callId);
+    await setDoc(appointmentRef, appointmentData);
+
+    console.log("Appointment saved successfully to Firestore");
+
+    // Respond with the required format
+    res.json({
+      results: [
+        {
+          toolCallId: toolCall.id,
+          result: "booked successfully",
+        },
+      ],
+    });
+  } catch (error) {
+    console.error("Error saving appointment to Firestore:", error);
+
+    // Respond with an error message
+    res.status(500).json({ error: "Failed to save appointment to Firestore" });
+  }
+});
 
 app.post("/outbound", async (req, res) => {
   try {
@@ -412,6 +446,19 @@ app.post(
     }
   },
 );
+
+// Wildcard route
+app.post("/*", (req, res) => {
+  console.log("wildcard route");
+  console.log("Path:", req.path);
+  console.log("Original URL:", req.originalUrl);
+  console.log(req.body);
+  res.json({
+    results: [
+      { toolCallId: req.body.toolCalls.id, result: "booked successfully" },
+    ],
+  });
+});
 
 // Error handling middleware
 app.use(errorHandler);
