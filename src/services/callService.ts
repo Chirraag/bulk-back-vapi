@@ -10,7 +10,7 @@ import {
   getDocFromServer,
   query,
 } from "firebase/firestore";
-import { utcToZonedTime } from "date-fns-tz";
+import { format, utcToZonedTime } from "date-fns-tz";
 
 const VAPI_API_KEY =
   process.env.VAPI_API_KEY || "a74661c9-f98f-4af0-afa4-00a0e80ce133";
@@ -207,7 +207,7 @@ export async function processCampaignCalls(campaignId: string) {
     }
 
     const campaign = campaignDoc.data();
-    const { start_time, end_time, timezone, assistantId } = campaign;
+    const { start_time, end_time, timezone, assistantId, campaign_end_date, contacts_called } = campaign;
 
     let status = await checkCampaignStatus(campaignId);
 
@@ -355,11 +355,26 @@ export async function processCampaignCalls(campaignId: string) {
       }
     }
 
+    // Check if the campaign end date has passed in the specified timezone
+    const now = new Date();
+    const currentDateInTimezone = utcToZonedTime(now, timezone);
+    const formattedCurrentDate = format(currentDateInTimezone, "yyyy-MM-dd");
+    const campaignEndDate = format(
+      utcToZonedTime(new Date(campaign_end_date), timezone),
+      "yyyy-MM-dd"
+    );
+
+    if (formattedCurrentDate >= campaignEndDate) {
+      await updateDoc(campaignRef, {
+        status: "completed",
+        completed_at: new Date().toISOString(),
+      });
+    
     // Update campaign status to completed
-    await updateDoc(campaignRef, {
-      status: "completed",
-      completed_at: new Date().toISOString(),
-    });
+    // await updateDoc(campaignRef, {
+    //   status: "completed",
+    //   completed_at: new Date().toISOString(),
+    // });
 
     logger.info(
       `Campaign ${campaignId} completed. Total calls made: ${callCount}`,

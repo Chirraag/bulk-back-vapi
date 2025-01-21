@@ -81,7 +81,7 @@ app.post("/make-appointment", async (req, res) => {
       results: [
         {
           toolCallId: toolCall.id,
-          result: "booked successfully",
+          result: `appointment successfully booked for date ${appointmentData.date} and time ${appointmentData.time}`,
         },
       ],
     });
