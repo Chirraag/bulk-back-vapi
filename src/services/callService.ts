@@ -15,7 +15,7 @@ import { format, utcToZonedTime } from "date-fns-tz";
 const VAPI_API_KEY =
   process.env.VAPI_API_KEY || "a74661c9-f98f-4af0-afa4-00a0e80ce133";
 const ASSISTANT_ID = "ed3e0153-8bf9-4c08-99a2-3cd9f250fd9a";
-const PHONE_NUMBER_ID = "a7043543-2130-47a5-8e28-63880c93b6b1";
+const PHONE_NUMBER_ID = "2b19cec6-a026-47fe-8d62-b93a0685aafc";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -25,6 +25,7 @@ async function makeCall(
   projectName: string,
   unitNumber: string,
   assisstantId: string,
+  phoneNumberId: string,
 ) {
   try {
     console.log(phoneNumber);
@@ -41,7 +42,7 @@ async function makeCall(
           number: "+" + phoneNumber,
           name: name,
         },
-        phoneNumberId: PHONE_NUMBER_ID,
+        phoneNumberId: phoneNumberId,
         assistantOverrides: {
           variableValues: {
             name: name,
@@ -207,7 +208,15 @@ export async function processCampaignCalls(campaignId: string) {
     }
 
     const campaign = campaignDoc.data();
-    const { start_time, end_time, timezone, assistantId, campaign_end_date, contacts_called } = campaign;
+    const {
+      start_time,
+      end_time,
+      timezone,
+      assistantId,
+      campaign_end_date,
+      contacts_called,
+      phoneNumberId,
+    } = campaign;
 
     let status = await checkCampaignStatus(campaignId);
 
@@ -223,7 +232,7 @@ export async function processCampaignCalls(campaignId: string) {
     const campaignRef = doc(db, "campaigns", campaignId);
     await updateDoc(campaignRef, { status: "in-progress" });
 
-    let callCount = 0;
+    let callCount = contacts_called ?? 0;
 
     if (!(await isWithinCampaignHours(start_time, end_time, timezone))) {
       logger.info(
@@ -277,7 +286,12 @@ export async function processCampaignCalls(campaignId: string) {
                   await setDoc(doc(db, "calls", contact.call_id), callData);
 
                   // Check if call should be retried
-                  if (callData.endedReason === "customer-did-not-answer") {
+                  if (
+                    callData.endedReason === "customer-did-not-answer" ||
+                    callData.analysis?.structuredData[
+                      "post-call-intent-analysis"
+                    ] === "callback"
+                  ) {
                     shouldCall = true;
                   }
                 }
@@ -294,7 +308,11 @@ export async function processCampaignCalls(campaignId: string) {
             }
           } else {
             const callData = callDoc.data();
-            if (callData.endedReason === "customer-did-not-answer") {
+            if (
+              callData.endedReason === "customer-did-not-answer" ||
+              callData.analysis?.structuredData["post-call-intent-analysis"] ===
+                "callback"
+            ) {
               shouldCall = true;
             }
           }
@@ -308,6 +326,7 @@ export async function processCampaignCalls(campaignId: string) {
             contact.project_name || "",
             contact.unit_number || "",
             assistantId || ASSISTANT_ID,
+            phoneNumberId || PHONE_NUMBER_ID,
           );
 
           // Update contact status
@@ -361,7 +380,7 @@ export async function processCampaignCalls(campaignId: string) {
     const formattedCurrentDate = format(currentDateInTimezone, "yyyy-MM-dd");
     const campaignEndDate = format(
       utcToZonedTime(new Date(campaign_end_date), timezone),
-      "yyyy-MM-dd"
+      "yyyy-MM-dd",
     );
 
     if (formattedCurrentDate >= campaignEndDate) {
@@ -369,16 +388,16 @@ export async function processCampaignCalls(campaignId: string) {
         status: "completed",
         completed_at: new Date().toISOString(),
       });
-    
+      logger.info(
+        `Campaign ${campaignId} completed. Total calls made: ${callCount}`,
+      );
+    }
+
     // Update campaign status to completed
     // await updateDoc(campaignRef, {
     //   status: "completed",
     //   completed_at: new Date().toISOString(),
     // });
-
-    logger.info(
-      `Campaign ${campaignId} completed. Total calls made: ${callCount}`,
-    );
   } catch (error) {
     logger.error("Error processing campaign:", error);
     throw error;
